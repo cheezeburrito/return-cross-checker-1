@@ -585,56 +585,54 @@ function extrasBlock(extras){
   return g;
 }
 
-/* ---------- email: one simple copy-paste box ---------- */
+/* ---------- email: one copy-paste box per carrier ---------- */
 function buildEmail(r){
-  const wrap=el('div','email');
-  const title=r.totalMissing? 'Email to send' : 'Nothing missing';
-  wrap.innerHTML='<h2 style="font-size:16px;margin:0 0 4px">'+title+'</h2>'+
-    '<p class="desc" style="color:var(--muted);font-size:13px;margin:0 0 12px">'+
-    (r.totalMissing
-      ? 'Copy this and paste it into your email. Edit it however you like.'
-      : 'Every tracking ID on the BOLs was scanned — no email needed.')+'</p>';
+  const wrap=el('div');
+  const withMissing=r.perBol.filter(b=>b.missing.length);
 
-  const ta=el('textarea'); ta.value=emailBody(r);
-  wrap.appendChild(ta);
-
-  const actions=el('div','actions');
-  const copy=el('button','primary'); copy.textContent='Copy email';
-  copy.onclick=()=>{ navigator.clipboard.writeText(ta.value).then(()=>toast('Copied — paste into your email')); };
-  actions.appendChild(copy);
-
-  if(r.totalMissing){
-    const copyIds=el('button','ghost'); copyIds.textContent='Copy just the tracking numbers';
-    copyIds.onclick=()=>{
-      const ids=[]; r.perBol.forEach(b=>b.missing.forEach(id=>ids.push(id)));
-      navigator.clipboard.writeText(ids.join('\n')).then(()=>toast(ids.length+' numbers copied'));
-    };
-    actions.appendChild(copyIds);
+  if(!withMissing.length){
+    const e=el('div','email');
+    e.innerHTML='<h2 style="font-size:16px;margin:0 0 4px">Nothing missing</h2>'+
+      '<p class="desc" style="color:var(--muted);font-size:13px;margin:0">Every tracking ID on the BOLs was scanned — no email needed.</p>';
+    wrap.appendChild(e);
+    return wrap;
   }
-  wrap.appendChild(actions);
+
+  const intro=el('p','desc');
+  intro.style.cssText='color:var(--muted);font-size:13px;margin:0 0 4px';
+  intro.textContent = withMissing.length>1
+    ? 'One email per carrier — copy each and send it to that carrier.'
+    : 'Copy this and paste it into your email.';
+  wrap.appendChild(intro);
+
+  withMissing.forEach(b=>{
+    const e=el('div','email');
+    e.innerHTML='<h2 style="font-size:16px;margin:0 0 10px">Email to '+escapeHtml(b.name)+
+      ' &nbsp;<span style="font-weight:600;font-size:12px;color:var(--bad)">'+b.missing.length+' missing</span></h2>';
+    const ta=el('textarea'); ta.value=carrierEmailBody(b);
+    e.appendChild(ta);
+
+    const actions=el('div','actions');
+    const copy=el('button','primary'); copy.textContent='Copy email';
+    copy.onclick=()=>{ navigator.clipboard.writeText(ta.value).then(()=>toast('Copied '+b.name+' email')); };
+    const copyIds=el('button','ghost'); copyIds.textContent='Copy just the tracking numbers';
+    copyIds.onclick=()=>{ navigator.clipboard.writeText(b.missing.join('\n')).then(()=>toast(b.missing.length+' numbers copied')); };
+    actions.appendChild(copy); actions.appendChild(copyIds);
+    e.appendChild(actions);
+    wrap.appendChild(e);
+  });
   return wrap;
 }
 
-function emailBody(r){
+function carrierEmailBody(b){
   const L=[];
   L.push('Hello all,');
   L.push('');
-  if(!r.totalMissing){
-    L.push('Cross-checked this week’s BOLs against the scan report — all '+r.totalBol+
-      ' tracking numbers were received and scanned. Nothing missing.');
-    L.push('');
-    L.push('Thanks');
-    return L.join('\n');
-  }
-  L.push('Here are the tracking numbers we did not receive (on the BOL but not in this week’s scan report):');
+  L.push('Here are the tracking numbers from the '+b.name+' BOL that we did not receive (not in this week’s scan report):');
   L.push('');
-  r.perBol.forEach(b=>{
-    if(!b.missing.length) return;
-    L.push(b.name+':');
-    b.missing.forEach(id=>L.push(id));
-    L.push('');
-  });
-  L.push('Total missing: '+r.totalMissing+' of '+r.totalBol+'.');
+  b.missing.forEach(id=>L.push(id));
+  L.push('');
+  L.push(b.missing.length+' missing out of '+b.total+'.');
   L.push('');
   L.push('Thanks');
   return L.join('\n');
