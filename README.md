@@ -2,7 +2,8 @@
 
 A single-file, **fully offline** web tool that cross-checks tracking IDs from
 carrier Bills of Lading (BOLs) against the warehouse scan report, and flags any
-package that was on a BOL but never got scanned.
+package that was on a BOL but never got scanned — so one person on the Ops team
+can do the weekly cross-reference in seconds instead of by hand.
 
 No install, no server, no internet. Everything runs in your browser — your
 files never leave your machine.
@@ -23,19 +24,25 @@ files never leave your machine.
 
 1. Open **`index.html`** in any modern browser (double-click it, or right-click →
    Open with). It works from a local file — no web host needed.
-2. Under **Bills of Lading**, upload the Intelcom and Metro BOLs. Add more
-   sources with **+ Add another BOL** if a load has more than two carriers.
-3. Under **Warehouse Scan Report**, upload the scan Excel file.
-4. For each file the tool auto-picks the sheet and the tracking-ID column. If it
-   guesses wrong, just change the dropdown — the "tracking IDs found" count
-   updates live so you can confirm it's reading the right column.
+2. Under **Bills of Lading**, drop in each carrier's BOL. Files can be **Excel,
+   CSV, or Word (.docx)** — BOLs often arrive as Word documents, and the tool
+   pulls the tracking numbers straight out of them. Add more carriers with
+   **+ Add another BOL** if needed.
+3. Under **Warehouse Scan Report**, drop in the scan file (Excel or CSV).
+4. The tool auto-finds the tracking-ID column (for Excel/CSV) or the tracking
+   numbers (for Word). The count updates live so you can confirm it read the
+   right thing:
+   - For Excel/CSV, if it picked the wrong column just change the dropdown.
+   - For Word, the pulled numbers show in an editable box — delete any stray
+     line before checking.
 5. Click **Cross-check tracking IDs** and review:
    - **Missing (not scanned)** — on a BOL but absent from the scan report. These
      are what you chase.
    - **Scanned, not on any BOL** — scanned but not on any loaded BOL (a possible
      missing BOL, a wrong load, or a typo).
-6. Use **Copy email**, **Open in mail app**, or **Copy just the IDs** in the
-   Draft email panel.
+6. Scroll to **Email to send** — a ready-to-paste message listing the missing
+   numbers by carrier. Hit **Copy email** (or **Copy just the tracking
+   numbers**) and paste it into your mail app.
 
 ## Matching rules
 
@@ -55,4 +62,9 @@ files never leave your machine.
 
 ## Supported input formats
 
-`.xlsx`, `.xls`, `.xlsm`, and `.csv`.
+- **BOLs:** `.xlsx`, `.xls`, `.xlsm`, `.csv`, and `.docx` (Word).
+- **Scan report:** `.xlsx`, `.xls`, `.xlsm`, `.csv`.
+
+Word `.docx` reading uses the browser's built-in decompression — no extra
+library needed. (Old-style binary `.doc` files aren't supported; re-save them as
+`.docx` first.)

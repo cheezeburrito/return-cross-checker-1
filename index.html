@@ -126,7 +126,7 @@
   <!-- DATA SET A -->
   <section class="card">
     <h2>Bills of Lading <span class="badge A">Data set A</span></h2>
-    <p class="desc">One source per carrier. Upload each BOL, pick the sheet, and choose the column that holds the tracking IDs.</p>
+    <p class="desc">One source per carrier. Drop in each BOL &mdash; Excel, CSV, or a Word document. The tool finds the tracking-ID column for you (change it if it guesses wrong).</p>
     <div class="sources" id="bolSources"></div>
     <button class="addbtn" id="addBol" style="margin-top:14px">+ Add another BOL source</button>
   </section>
@@ -134,7 +134,7 @@
   <!-- DATA SET B -->
   <section class="card">
     <h2>Warehouse Scan Report <span class="badge B">Data set B</span></h2>
-    <p class="desc">The single Excel report of everything Ops scanned this week. Choose the sheet and the tracking-ID column.</p>
+    <p class="desc">The single scan report of everything Ops scanned this week (Excel or CSV). The tool finds the tracking-ID column for you.</p>
     <div class="sources" id="scanSource"></div>
   </section>
 
@@ -152,8 +152,8 @@
 "use strict";
 
 /* ---------- state ---------- */
-let bolList = [];          // [{uid,name,file,wb,sheet,header,col}]
-let scan = { uid:'scan', name:'Scan report', file:null, wb:null, sheet:'', header:true, col:-1 };
+let bolList = [];          // [{uid,name,kind,file,wb,sheet,header,col,docText}]
+let scan = { uid:'scan', name:'Scan report', kind:'sheet', file:null, wb:null, sheet:'', header:true, col:-1, docText:null };
 let uidSeq = 0;
 
 /* ---------- helpers ---------- */
@@ -253,8 +253,57 @@ function guessCol(src){
   return best>=0?best:0;
 }
 
-/* extract {raw, norm} id objects from a source, skipping header row if set */
+/* ---- Word (.docx) support: unzip word/document.xml and pull ID-like tokens ---- */
+async function readDocxXml(file){
+  const ab=await file.arrayBuffer();
+  const buf=new Uint8Array(ab), dv=new DataView(ab), dec=new TextDecoder();
+  let i=buf.length-22;
+  while(i>=0 && dv.getUint32(i,true)!==0x06054b50) i--;
+  if(i<0) throw new Error('This does not look like a .docx file (no zip end record). If it is an old .doc, re-save it as .docx.');
+  const cdOff=dv.getUint32(i+16,true), n=dv.getUint16(i+10,true);
+  let p=cdOff, hit=null;
+  for(let e=0;e<n && p+46<=buf.length;e++){
+    if(dv.getUint32(p,true)!==0x02014b50) break;
+    const method=dv.getUint16(p+10,true), csize=dv.getUint32(p+20,true);
+    const fnLen=dv.getUint16(p+28,true), exLen=dv.getUint16(p+30,true), cmLen=dv.getUint16(p+32,true);
+    const lho=dv.getUint32(p+42,true);
+    const fn=dec.decode(buf.subarray(p+46,p+46+fnLen));
+    if(fn==='word/document.xml'){ hit={method,csize,lho}; break; }
+    p+=46+fnLen+exLen+cmLen;
+  }
+  if(!hit) throw new Error('Could not find the document body inside the .docx.');
+  const lfn=dv.getUint16(hit.lho+26,true), lex=dv.getUint16(hit.lho+28,true);
+  const start=hit.lho+30+lfn+lex;
+  const raw=buf.slice(start,start+hit.csize);
+  let xmlBytes;
+  if(hit.method===0){ xmlBytes=raw; }
+  else{
+    const stream=new Response(raw).body.pipeThrough(new DecompressionStream('deflate-raw'));
+    xmlBytes=new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  return new TextDecoder('utf-8').decode(xmlBytes);
+}
+/* pull tracking-ID-like tokens from raw document text */
+function docxTokens(xml){
+  const txt=xml.replace(/<[^>]+>/g,' ');
+  const seen=new Set(), out=[];
+  (txt.match(/[A-Za-z0-9][A-Za-z0-9\-]{7,}/g)||[]).forEach(t=>{
+    // keep alphanumeric IDs with a digit; drop pure short numbers (dates, phone, etc.)
+    if(!/\d/.test(t)) return;
+    if(!/[A-Za-z]/.test(t) && t.length<12) return;
+    const k=t.toUpperCase();
+    if(seen.has(k)) return;
+    seen.add(k); out.push(t);
+  });
+  return out;
+}
+
+/* extract {raw, norm} id objects from a source */
 function extractIds(src){
+  if(src.kind==='docx'){
+    return src.docText.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)
+      .map(raw=>({raw,norm:normalize(raw)}));
+  }
   const rows=sheetRows(src.wb,src.sheet);
   const start=src.header?1:0;
   const out=[];
@@ -269,8 +318,10 @@ function extractIds(src){
 
 /* ---------- rendering: source cards ---------- */
 function newBol(name){
-  return {uid:'b'+(++uidSeq),name:name||('Carrier '+(bolList.length+1)),file:null,wb:null,sheet:'',header:true,col:-1};
+  return {uid:'b'+(++uidSeq),name:name||('Carrier '+(bolList.length+1)),kind:'sheet',file:null,wb:null,sheet:'',header:true,col:-1,docText:null};
 }
+function srcLoaded(s){ return s.kind==='docx' ? s.docText!=null : !!s.wb; }
+function srcReady(s){ return s.kind==='docx' ? s.docText!=null : (s.wb&&s.col>=0); }
 
 function renderAll(){
   const host=$('#bolSources'); host.innerHTML='';
@@ -295,10 +346,10 @@ function renderSource(src,removable){
   }
   card.appendChild(row1);
 
-  if(!src.wb){
+  if(!srcLoaded(src)){
     const drop=el('label','drop');
-    drop.innerHTML='<b>Click to choose</b> or drop an Excel/CSV file here';
-    const inp=el('input'); inp.type='file'; inp.accept='.xlsx,.xls,.csv,.xlsm';
+    drop.innerHTML='<b>Click to choose</b> or drop a file here &nbsp;<span style="opacity:.7">Excel, CSV or Word</span>';
+    const inp=el('input'); inp.type='file'; inp.accept='.xlsx,.xls,.xlsm,.csv,.docx';
     inp.onchange=()=>{ if(inp.files[0]) loadFile(src,inp.files[0]); };
     drop.appendChild(inp);
     drop.ondragover=e=>{e.preventDefault();drop.classList.add('over');};
@@ -306,53 +357,72 @@ function renderSource(src,removable){
     drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');
       if(e.dataTransfer.files[0]) loadFile(src,e.dataTransfer.files[0]);};
     card.appendChild(drop);
-  }else{
-    const fl=el('div','fileline');
-    fl.innerHTML='📄 <span>'+src.file.name+'</span>';
-    const x=el('span','x'); x.textContent='change file';
-    x.onclick=()=>{ src.file=null;src.wb=null;src.sheet='';src.col=-1;renderAll(); };
-    fl.appendChild(x);
-    card.appendChild(fl);
-
-    const controls=el('div','controls show');
-
-    // sheet
-    if(src.wb.SheetNames.length>1){
-      const f=el('div','fld');
-      f.innerHTML='<label>Sheet</label>';
-      const sel=el('select');
-      src.wb.SheetNames.forEach(n=>{const o=el('option');o.value=n;o.textContent=n;sel.appendChild(o);});
-      sel.value=src.sheet;
-      sel.onchange=()=>{ src.sheet=sel.value; autoCol(src); renderAll(); };
-      f.appendChild(sel); controls.appendChild(f);
-    }
-
-    // header checkbox
-    const fh=el('label','chk');
-    const cb=el('input'); cb.type='checkbox'; cb.checked=src.header;
-    cb.onchange=()=>{ src.header=cb.checked; autoCol(src); renderAll(); };
-    fh.appendChild(cb); fh.appendChild(document.createTextNode('First row is a header'));
-    controls.appendChild(fh);
-
-    // column
-    const cols=columnsFor(src.wb,src.sheet,src.header);
-    const fc=el('div','fld');
-    fc.innerHTML='<label>Tracking-ID column</label>';
-    const csel=el('select');
-    cols.forEach(c=>{const o=el('option');o.value=c.index;o.textContent=c.label;csel.appendChild(o);});
-    if(src.col<0||src.col>=cols.length) src.col=guessCol(src);
-    csel.value=src.col;
-    csel.onchange=()=>{ src.col=+csel.value; renderAll(); };
-    fc.appendChild(csel); controls.appendChild(fc);
-
-    // count
-    const cnt=el('div','count');
-    const ids=extractIds(src);
-    cnt.innerHTML='<b>'+ids.length+'</b> tracking IDs found';
-    controls.appendChild(cnt);
-
-    card.appendChild(controls);
+    return card;
   }
+
+  const fl=el('div','fileline');
+  fl.innerHTML=(src.kind==='docx'?'📝 ':'📄 ')+'<span>'+src.file.name+'</span>';
+  const x=el('span','x'); x.textContent='change file';
+  x.onclick=()=>{ src.file=null;src.wb=null;src.sheet='';src.col=-1;src.kind='sheet';src.docText=null;renderAll(); };
+  fl.appendChild(x);
+  card.appendChild(fl);
+
+  if(src.kind==='docx'){
+    // Word docs have no columns: show the auto-pulled IDs in an editable box
+    const controls=el('div','controls show');
+    controls.style.flexDirection='column';
+    controls.style.alignItems='stretch';
+    const ids=extractIds(src);
+    const cap=el('div','count');
+    cap.innerHTML='<b>'+ids.length+'</b> tracking IDs pulled from the Word doc &nbsp;<span style="opacity:.7">— one per line, edit if any look wrong</span>';
+    const ta=el('textarea');
+    ta.style.cssText='width:100%;min-height:120px;background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:10px;font:12.5px/1.5 ui-monospace,Menlo,monospace;resize:vertical';
+    ta.value=src.docText;
+    ta.oninput=()=>{ src.docText=ta.value;
+      cap.innerHTML='<b>'+extractIds(src).length+'</b> tracking IDs &nbsp;<span style="opacity:.7">— one per line</span>';
+      refreshRun(); };
+    controls.appendChild(cap); controls.appendChild(ta);
+    card.appendChild(controls);
+    return card;
+  }
+
+  const controls=el('div','controls show');
+
+  // sheet
+  if(src.wb.SheetNames.length>1){
+    const f=el('div','fld');
+    f.innerHTML='<label>Sheet</label>';
+    const sel=el('select');
+    src.wb.SheetNames.forEach(n=>{const o=el('option');o.value=n;o.textContent=n;sel.appendChild(o);});
+    sel.value=src.sheet;
+    sel.onchange=()=>{ src.sheet=sel.value; autoCol(src); renderAll(); };
+    f.appendChild(sel); controls.appendChild(f);
+  }
+
+  // header checkbox
+  const fh=el('label','chk');
+  const cb=el('input'); cb.type='checkbox'; cb.checked=src.header;
+  cb.onchange=()=>{ src.header=cb.checked; autoCol(src); renderAll(); };
+  fh.appendChild(cb); fh.appendChild(document.createTextNode('First row is a header'));
+  controls.appendChild(fh);
+
+  // column
+  const cols=columnsFor(src.wb,src.sheet,src.header);
+  const fc=el('div','fld');
+  fc.innerHTML='<label>Tracking-ID column</label>';
+  const csel=el('select');
+  cols.forEach(c=>{const o=el('option');o.value=c.index;o.textContent=c.label;csel.appendChild(o);});
+  if(src.col<0||src.col>=cols.length) src.col=guessCol(src);
+  csel.value=src.col;
+  csel.onchange=()=>{ src.col=+csel.value; renderAll(); };
+  fc.appendChild(csel); controls.appendChild(fc);
+
+  // count
+  const cnt=el('div','count');
+  cnt.innerHTML='<b>'+extractIds(src).length+'</b> tracking IDs found';
+  controls.appendChild(cnt);
+
+  card.appendChild(controls);
   return card;
 }
 
@@ -363,9 +433,15 @@ function autoCol(src){
 async function loadFile(src,file){
   try{
     toast('Reading '+file.name+'…');
-    const wb=await readWorkbook(file);
-    src.file=file; src.wb=wb; src.sheet=wb.SheetNames[0];
-    autoCol(src);
+    if(/\.docx$/i.test(file.name)){
+      const xml=await readDocxXml(file);
+      const ids=docxTokens(xml);
+      src.file=file; src.kind='docx'; src.wb=null; src.docText=ids.join('\n');
+    }else{
+      const wb=await readWorkbook(file);
+      src.file=file; src.kind='sheet'; src.docText=null; src.wb=wb; src.sheet=wb.SheetNames[0];
+      autoCol(src);
+    }
     renderAll();
   }catch(err){
     console.error(err);
@@ -374,8 +450,8 @@ async function loadFile(src,file){
 }
 
 function refreshRun(){
-  const bolReady=bolList.some(b=>b.wb&&b.col>=0);
-  const scanReady=scan.wb&&scan.col>=0;
+  const bolReady=bolList.some(srcReady);
+  const scanReady=srcReady(scan);
   const ok=bolReady&&scanReady;
   $('#runBtn').disabled=!ok;
   $('#runHint').textContent= ok ? 'Ready.' :
@@ -393,7 +469,7 @@ function runCrossCheck(){
   const bolNormSet=new Set();
   let totalBol=0, totalMissing=0, totalMatched=0;
 
-  bolList.filter(b=>b.wb&&b.col>=0).forEach(b=>{
+  bolList.filter(srcReady).forEach(b=>{
     const ids=extractIds(b);
     const seen=new Set();
     const missing=[], matched=[];
@@ -485,90 +561,58 @@ function extrasBlock(extras){
   return g;
 }
 
-/* ---------- email ---------- */
+/* ---------- email: one simple copy-paste box ---------- */
 function buildEmail(r){
   const wrap=el('div','email');
-  wrap.innerHTML='<h2 style="font-size:16px;margin:0 0 4px">Draft email</h2>'+
-    '<p class="desc" style="color:var(--muted);font-size:13px;margin:0 0 14px">Auto-filled with the missing tracking IDs. Edit anything below, then copy or open in your mail app.</p>';
+  const title=r.totalMissing? 'Email to send' : 'Nothing missing';
+  wrap.innerHTML='<h2 style="font-size:16px;margin:0 0 4px">'+title+'</h2>'+
+    '<p class="desc" style="color:var(--muted);font-size:13px;margin:0 0 12px">'+
+    (r.totalMissing
+      ? 'Copy this and paste it into your email. Edit it however you like.'
+      : 'Every tracking ID on the BOLs was scanned — no email needed.')+'</p>';
 
-  const frow=el('div','frow');
-  const toF=fld('To','email','ops@yourcompany.com');
-  const subjF=fld('Subject','text','');
-  const weekF=fld('Week of','text',defaultWeek());
-  frow.appendChild(toF.wrap); frow.appendChild(weekF.wrap); frow.appendChild(subjF.wrap);
-  wrap.appendChild(frow);
-
-  const ta=el('textarea'); wrap.appendChild(ta);
-
-  const build=()=>{
-    const week=weekF.input.value.trim();
-    subjF.input.value='Missing scans — BOL cross-check'+(week?' (week of '+week+')':'');
-    ta.value=emailBody(r,week);
-  };
+  const ta=el('textarea'); ta.value=emailBody(r);
+  wrap.appendChild(ta);
 
   const actions=el('div','actions');
   const copy=el('button','primary'); copy.textContent='Copy email';
-  copy.onclick=()=>{ navigator.clipboard.writeText(ta.value).then(()=>toast('Email copied to clipboard')); };
-  const mail=el('button','ghost'); mail.textContent='Open in mail app';
-  mail.onclick=()=>{
-    const url='mailto:'+encodeURIComponent(toF.input.value)+
-      '?subject='+encodeURIComponent(subjF.input.value)+
-      '&body='+encodeURIComponent(ta.value);
-    window.location.href=url;
-  };
-  const copyIds=el('button','ghost'); copyIds.textContent='Copy just the IDs';
-  copyIds.onclick=()=>{
-    const ids=[]; r.perBol.forEach(b=>b.missing.forEach(id=>ids.push(id)));
-    navigator.clipboard.writeText(ids.join('\n')).then(()=>toast(ids.length+' IDs copied'));
-  };
-  actions.appendChild(copy); actions.appendChild(mail); actions.appendChild(copyIds);
-  wrap.appendChild(actions);
+  copy.onclick=()=>{ navigator.clipboard.writeText(ta.value).then(()=>toast('Copied — paste into your email')); };
+  actions.appendChild(copy);
 
-  weekF.input.oninput=build;
-  build();
+  if(r.totalMissing){
+    const copyIds=el('button','ghost'); copyIds.textContent='Copy just the tracking numbers';
+    copyIds.onclick=()=>{
+      const ids=[]; r.perBol.forEach(b=>b.missing.forEach(id=>ids.push(id)));
+      navigator.clipboard.writeText(ids.join('\n')).then(()=>toast(ids.length+' numbers copied'));
+    };
+    actions.appendChild(copyIds);
+  }
+  wrap.appendChild(actions);
   return wrap;
 }
 
-function fld(label,type,val){
-  const wrap=el('div','fld');
-  const l=el('label'); l.textContent=label;
-  const input=el('input'); input.type=type; input.value=val||'';
-  wrap.appendChild(l); wrap.appendChild(input);
-  return {wrap,input};
-}
-
-function defaultWeek(){
-  const d=new Date();
-  return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
-}
-
-function emailBody(r,week){
+function emailBody(r){
   const L=[];
-  L.push('Hi team,');
+  L.push('Hello all,');
   L.push('');
-  L.push('We cross-checked this week’s carrier BOLs'+(week?' (week of '+week+')':'')+
-    ' against Pasquale’s scan report. The following tracking IDs were on a BOL but were NOT found in the scan report:');
+  if(!r.totalMissing){
+    L.push('Cross-checked this week’s BOLs against the scan report — all '+r.totalBol+
+      ' tracking numbers were received and scanned. Nothing missing.');
+    L.push('');
+    L.push('Thanks');
+    return L.join('\n');
+  }
+  L.push('Here are the tracking numbers we did not receive (on the BOL but not in this week’s scan report):');
   L.push('');
-  let any=false;
   r.perBol.forEach(b=>{
     if(!b.missing.length) return;
-    any=true;
-    L.push(b.name+' — '+b.missing.length+' missing:');
-    b.missing.forEach(id=>L.push('  • '+id));
+    L.push(b.name+':');
+    b.missing.forEach(id=>L.push(id));
     L.push('');
   });
-  if(!any){
-    L.push('  (No missing IDs — everything on the BOLs was scanned.)');
-    L.push('');
-  }
-  L.push('Summary: '+r.totalMatched+' of '+r.totalBol+' BOL IDs scanned, '+r.totalMissing+' missing.');
-  if(r.extras.length){
-    L.push(r.extras.length+' scanned ID(s) did not appear on any BOL — flagging in case a BOL is missing.');
-  }
+  L.push('Total missing: '+r.totalMissing+' of '+r.totalBol+'.');
   L.push('');
-  L.push('Please locate/scan the missing packages or confirm they were not received.');
-  L.push('');
-  L.push('Thanks,');
+  L.push('Thanks');
   return L.join('\n');
 }
 
