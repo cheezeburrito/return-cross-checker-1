@@ -5,8 +5,10 @@ carrier Bills of Lading (BOLs) against the warehouse scan report, and flags any
 package that was on a BOL but never got scanned — so one person on the Ops team
 can do the weekly cross-reference in seconds instead of by hand.
 
-No install, no server, no internet. Everything runs in your browser — your
-files never leave your machine.
+It's a **single self-contained `index.html`** — the Excel engine is embedded
+inside it, so there are no other files to keep track of. No install, no server,
+no internet. Everything runs in your browser — your files never leave your
+machine.
 
 ## The workflow it supports
 
@@ -23,7 +25,8 @@ files never leave your machine.
 ## How to use it
 
 1. Open **`index.html`** in any modern browser (double-click it, or right-click →
-   Open with). It works from a local file — no web host needed.
+   Open with). It's one self-contained file — you can put it anywhere (Desktop,
+   a shared drive, wherever) and it just works. No other files needed.
 2. Under **Bills of Lading**, drop in each carrier's BOL. Files can be **Excel,
    CSV, or Word (.docx)** — BOLs often arrive as Word documents, and the tool
    pulls the tracking numbers straight out of them. Add more carriers with
@@ -56,8 +59,7 @@ files never leave your machine.
 
 | File | Purpose |
 |------|---------|
-| `index.html` | The entire app (open this). |
-| `vendor/xlsx.full.min.js` | [SheetJS](https://sheetjs.com/) Excel parser, bundled locally so the tool works offline. |
+| `index.html` | **The entire app — open this.** The [SheetJS](https://sheetjs.com/) Excel engine is embedded inside it, so it's the only file you need. |
 | `samples/` | Example Intelcom BOL, Metro BOL, and scan report you can load to try it. In the sample, `INT100003` and `MET900004` are the two missing IDs. |
 
 ## Supported input formats
