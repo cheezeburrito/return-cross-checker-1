@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BOL &times; Scan Cross-Checker</title>
+<script src="./vendor/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#171e2e; --panel2:#1e2739; --line:#2a3550;
+    --ink:#e8edf7; --muted:#93a0bd; --accent:#4f8cff; --accent2:#2f6fe0;
+    --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --chip:#243049;
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:linear-gradient(180deg,#0d1220,#0f1420 40%);
+    color:var(--ink); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:28px 20px 80px;
+  }
+  .wrap{max-width:1060px;margin:0 auto}
+  header.top{margin-bottom:22px}
+  h1{font-size:24px;margin:0 0 4px;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:14px;margin:0}
+  .steps{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 26px}
+  .step{background:var(--chip);color:var(--muted);border:1px solid var(--line);
+    padding:4px 11px;border-radius:20px;font-size:12.5px}
+  .step b{color:var(--accent)}
+  section.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px 18px 16px;margin-bottom:18px}
+  .card h2{font-size:16px;margin:0 0 3px;display:flex;align-items:center;gap:8px}
+  .card .desc{color:var(--muted);font-size:13px;margin:0 0 14px}
+  .badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;background:var(--chip);color:var(--muted);border:1px solid var(--line)}
+  .badge.A{color:#ffd27a;border-color:#5a4a24;background:#2a2413}
+  .badge.B{color:#7ad0ff;border-color:#1f4a63;background:#0f2634}
+
+  .sources{display:grid;gap:14px}
+  .src{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .src .row1{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  .src input.name{background:var(--bg);border:1px solid var(--line);color:var(--ink);
+    border-radius:8px;padding:7px 10px;font-size:14px;font-weight:600;min-width:150px}
+  .src .rm{margin-left:auto;background:transparent;border:1px solid var(--line);color:var(--muted);
+    border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12.5px}
+  .src .rm:hover{color:var(--bad);border-color:var(--bad)}
+  .drop{border:1.5px dashed var(--line);border-radius:9px;padding:14px;text-align:center;
+    color:var(--muted);cursor:pointer;transition:.15s;font-size:13.5px}
+  .drop:hover,.drop.over{border-color:var(--accent);color:var(--ink);background:rgba(79,140,255,.06)}
+  .drop input{display:none}
+  .controls{display:none;gap:12px;flex-wrap:wrap;margin-top:12px;align-items:flex-end}
+  .controls.show{display:flex}
+  .fld{display:flex;flex-direction:column;gap:5px}
+  .fld label{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .fld select{background:var(--bg);border:1px solid var(--line);color:var(--ink);
+    border-radius:8px;padding:8px 10px;font-size:14px;min-width:150px}
+  .chk{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);padding-bottom:9px}
+  .chk input{accent-color:var(--accent);width:15px;height:15px}
+  .count{font-size:12.5px;color:var(--muted);padding-bottom:9px}
+  .count b{color:var(--ok)}
+  .fileline{font-size:13px;color:var(--ink);display:flex;align-items:center;gap:8px;margin-top:2px}
+  .fileline .x{color:var(--muted);cursor:pointer;text-decoration:underline;font-size:12px}
+  .addbtn{background:transparent;border:1px dashed var(--line);color:var(--muted);border-radius:9px;
+    padding:9px;cursor:pointer;font-size:13px;width:100%}
+  .addbtn:hover{border-color:var(--accent);color:var(--ink)}
+
+  .go{display:flex;gap:12px;align-items:center;margin:4px 0 22px;flex-wrap:wrap}
+  button.primary{background:var(--accent);border:none;color:#fff;font-weight:600;font-size:15px;
+    padding:12px 22px;border-radius:10px;cursor:pointer}
+  button.primary:hover{background:var(--accent2)}
+  button.primary:disabled{opacity:.45;cursor:not-allowed}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--muted);
+    padding:11px 16px;border-radius:10px;cursor:pointer;font-size:14px}
+  button.ghost:hover{color:var(--ink);border-color:var(--accent)}
+  .hint{color:var(--muted);font-size:13px}
+
+  #results{display:none}
+  #results.show{display:block}
+  .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .stat .n{font-size:26px;font-weight:700}
+  .stat .l{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .stat.ok .n{color:var(--ok)} .stat.bad .n{color:var(--bad)} .stat.warn .n{color:var(--warn)}
+  .banner{border-radius:10px;padding:13px 16px;margin-bottom:18px;font-size:14.5px;font-weight:600;display:flex;gap:10px;align-items:center}
+  .banner.ok{background:rgba(52,211,153,.1);border:1px solid #1f5f49;color:var(--ok)}
+  .banner.bad{background:rgba(248,113,113,.1);border:1px solid #6b2d2d;color:var(--bad)}
+
+  .grp{background:var(--panel2);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden}
+  .grp .hd{display:flex;align-items:center;gap:10px;padding:12px 15px;cursor:pointer;font-weight:600}
+  .grp .hd .pill{margin-left:auto;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px}
+  .pill.bad{background:rgba(248,113,113,.15);color:var(--bad)}
+  .pill.ok{background:rgba(52,211,153,.15);color:var(--ok)}
+  .grp .body{display:none;padding:0 15px 14px}
+  .grp .body.show{display:block}
+  .idlist{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .idlist .id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+    background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+  .idlist .id.miss{border-color:#6b2d2d;color:#ffb4b4}
+  .note{font-size:12.5px;color:var(--muted);margin:8px 0 0}
+
+  .email{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-top:20px}
+  .email .frow{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .email .fld input{background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 10px;font-size:14px;min-width:220px}
+  .email textarea{width:100%;min-height:230px;background:var(--bg);border:1px solid var(--line);color:var(--ink);
+    border-radius:9px;padding:12px;font:13px/1.55 ui-monospace,Menlo,monospace;resize:vertical}
+  .email .actions{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--ok);color:#04120c;font-weight:600;padding:10px 18px;border-radius:10px;opacity:0;
+    transition:.25s;pointer-events:none}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  a.plain{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>BOL &times; Scan Cross-Checker</h1>
+    <p class="sub">Match tracking IDs from carrier Bills of Lading against the warehouse scan report, and flag anything that didn&rsquo;t get scanned.</p>
+    <div class="steps">
+      <span class="step"><b>1</b>&nbsp; Intelcom &amp; Metro drop off packages</span>
+      <span class="step"><b>2</b>&nbsp; Ops scans everything</span>
+      <span class="step"><b>3</b>&nbsp; Load BOLs + scan report here</span>
+      <span class="step"><b>4</b>&nbsp; Cross-check</span>
+      <span class="step"><b>5</b>&nbsp; Draft email for the misses</span>
+    </div>
+  </header>
+
+  <!-- DATA SET A -->
+  <section class="card">
+    <h2>Bills of Lading <span class="badge A">Data set A</span></h2>
+    <p class="desc">One source per carrier. Upload each BOL, pick the sheet, and choose the column that holds the tracking IDs.</p>
+    <div class="sources" id="bolSources"></div>
+    <button class="addbtn" id="addBol" style="margin-top:14px">+ Add another BOL source</button>
+  </section>
+
+  <!-- DATA SET B -->
+  <section class="card">
+    <h2>Warehouse Scan Report <span class="badge B">Data set B</span></h2>
+    <p class="desc">The single Excel report of everything Ops scanned this week. Choose the sheet and the tracking-ID column.</p>
+    <div class="sources" id="scanSource"></div>
+  </section>
+
+  <div class="go">
+    <button class="primary" id="runBtn" disabled>Cross-check tracking IDs</button>
+    <span class="hint" id="runHint">Load your BOLs and the scan report to enable.</span>
+  </div>
+
+  <section id="results" class="card"></section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* ---------- state ---------- */
+let bolList = [];          // [{uid,name,file,wb,sheet,header,col}]
+let scan = { uid:'scan', name:'Scan report', file:null, wb:null, sheet:'', header:true, col:-1 };
+let uidSeq = 0;
+
+/* ---------- helpers ---------- */
+const $ = (s,r=document)=>r.querySelector(s);
+const el = (t,c)=>{const e=document.createElement(t); if(c)e.className=c; return e;};
+
+function toast(msg){
+  const t=$('#toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800);
+}
+
+/* long numbers -> plain string (no scientific notation) */
+function cellToStr(v){
+  if(v===null||v===undefined) return '';
+  if(typeof v==='number'){
+    if(Number.isInteger(v)) return v.toLocaleString('fullwide',{useGrouping:false});
+    return String(v);
+  }
+  if(v instanceof Date) return v.toISOString();
+  return String(v);
+}
+function normalize(s){
+  return cellToStr(s).replace(/\s+/g,'').trim().toUpperCase();
+}
+
+function readWorkbook(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onerror=()=>reject(r.error);
+    r.onload=()=>{
+      try{ resolve(XLSX.read(new Uint8Array(r.result),{type:'array'})); }
+      catch(err){ reject(err); }
+    };
+    r.readAsArrayBuffer(file);
+  });
+}
+
+/* rows as array-of-arrays for a sheet */
+function sheetRows(wb,sheetName){
+  const ws=wb.Sheets[sheetName];
+  if(!ws) return [];
+  return XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null,blankrows:false});
+}
+
+function columnsFor(wb,sheetName,header){
+  const rows=sheetRows(wb,sheetName);
+  if(!rows.length) return [];
+  let width=0; rows.forEach(r=>{ if(r.length>width) width=r.length; });
+  const letters=i=>{let s='';i++;while(i>0){i--;s=String.fromCharCode(65+i%26)+s;i=Math.floor(i/26);}return s;};
+  const out=[];
+  for(let i=0;i<width;i++){
+    let label='Column '+letters(i);
+    if(header && rows[0] && rows[0][i]!=null && cellToStr(rows[0][i]).trim()!==''){
+      label=cellToStr(rows[0][i]).trim();
+    }
+    out.push({index:i,label});
+  }
+  return out;
+}
+
+/* sample non-empty data values from a column */
+function sampleValues(src,colIndex,max=40){
+  const rows=sheetRows(src.wb,src.sheet);
+  const start=src.header?1:0;
+  const out=[];
+  for(let r=start;r<rows.length && out.length<max;r++){
+    const s=cellToStr(rows[r]?rows[r][colIndex]:null).trim();
+    if(s!=='') out.push(s);
+  }
+  return out;
+}
+/* how tracking-ID-like do a column's values look (0..1) */
+function idShapeScore(vals){
+  if(!vals.length) return 0;
+  let hit=0;
+  vals.forEach(v=>{
+    const t=v.replace(/\s+/g,'');
+    if(/^[A-Za-z0-9][A-Za-z0-9\-]{5,39}$/.test(t) && /\d/.test(t)) hit++;
+  });
+  return hit/vals.length;
+}
+/* guess which column holds tracking ids — data shape dominates, header is a tiebreaker */
+function guessCol(src){
+  const cols=columnsFor(src.wb,src.sheet,src.header);
+  if(!cols.length) return -1;
+  const strong=/(track|barcode|waybill|awb|colis|package\s*id|parcel|shipment|\bpkg\b|tracking)/i;
+  const weak=/(\bid\b|number|\bno\b|#|ref|scan)/i;
+  const bad=/(time|date|weight|scanner|\bname\b|qty|quantity|count|address|zone|status|carrier|driver|route)/i;
+  let best=-1,bestScore=-Infinity;
+  cols.forEach(c=>{
+    let s=idShapeScore(sampleValues(src,c.index))*3;   // data shape, 0..3
+    if(strong.test(c.label)) s+=2.5;
+    else if(weak.test(c.label)) s+=0.8;
+    if(bad.test(c.label)) s-=1.5;
+    if(s>bestScore){bestScore=s;best=c.index;}
+  });
+  return best>=0?best:0;
+}
+
+/* extract {raw, norm} id objects from a source, skipping header row if set */
+function extractIds(src){
+  const rows=sheetRows(src.wb,src.sheet);
+  const start=src.header?1:0;
+  const out=[];
+  for(let r=start;r<rows.length;r++){
+    const cell=rows[r] ? rows[r][src.col] : null;
+    const raw=cellToStr(cell).trim();
+    if(raw==='') continue;
+    out.push({raw,norm:normalize(cell)});
+  }
+  return out;
+}
+
+/* ---------- rendering: source cards ---------- */
+function newBol(name){
+  return {uid:'b'+(++uidSeq),name:name||('Carrier '+(bolList.length+1)),file:null,wb:null,sheet:'',header:true,col:-1};
+}
+
+function renderAll(){
+  const host=$('#bolSources'); host.innerHTML='';
+  bolList.forEach(src=>host.appendChild(renderSource(src,true)));
+  const sh=$('#scanSource'); sh.innerHTML='';
+  sh.appendChild(renderSource(scan,false));
+  refreshRun();
+}
+
+function renderSource(src,removable){
+  const card=el('div','src');
+
+  const row1=el('div','row1');
+  const nm=el('input','name'); nm.type='text'; nm.value=src.name;
+  nm.oninput=()=>{ src.name=nm.value; };
+  if(!removable){ nm.disabled=true; nm.style.opacity=.8; }
+  row1.appendChild(nm);
+  if(removable){
+    const rm=el('button','rm'); rm.textContent='Remove';
+    rm.onclick=()=>{ bolList=bolList.filter(b=>b!==src); renderAll(); };
+    row1.appendChild(rm);
+  }
+  card.appendChild(row1);
+
+  if(!src.wb){
+    const drop=el('label','drop');
+    drop.innerHTML='<b>Click to choose</b> or drop an Excel/CSV file here';
+    const inp=el('input'); inp.type='file'; inp.accept='.xlsx,.xls,.csv,.xlsm';
+    inp.onchange=()=>{ if(inp.files[0]) loadFile(src,inp.files[0]); };
+    drop.appendChild(inp);
+    drop.ondragover=e=>{e.preventDefault();drop.classList.add('over');};
+    drop.ondragleave=()=>drop.classList.remove('over');
+    drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');
+      if(e.dataTransfer.files[0]) loadFile(src,e.dataTransfer.files[0]);};
+    card.appendChild(drop);
+  }else{
+    const fl=el('div','fileline');
+    fl.innerHTML='📄 <span>'+src.file.name+'</span>';
+    const x=el('span','x'); x.textContent='change file';
+    x.onclick=()=>{ src.file=null;src.wb=null;src.sheet='';src.col=-1;renderAll(); };
+    fl.appendChild(x);
+    card.appendChild(fl);
+
+    const controls=el('div','controls show');
+
+    // sheet
+    if(src.wb.SheetNames.length>1){
+      const f=el('div','fld');
+      f.innerHTML='<label>Sheet</label>';
+      const sel=el('select');
+      src.wb.SheetNames.forEach(n=>{const o=el('option');o.value=n;o.textContent=n;sel.appendChild(o);});
+      sel.value=src.sheet;
+      sel.onchange=()=>{ src.sheet=sel.value; autoCol(src); renderAll(); };
+      f.appendChild(sel); controls.appendChild(f);
+    }
+
+    // header checkbox
+    const fh=el('label','chk');
+    const cb=el('input'); cb.type='checkbox'; cb.checked=src.header;
+    cb.onchange=()=>{ src.header=cb.checked; autoCol(src); renderAll(); };
+    fh.appendChild(cb); fh.appendChild(document.createTextNode('First row is a header'));
+    controls.appendChild(fh);
+
+    // column
+    const cols=columnsFor(src.wb,src.sheet,src.header);
+    const fc=el('div','fld');
+    fc.innerHTML='<label>Tracking-ID column</label>';
+    const csel=el('select');
+    cols.forEach(c=>{const o=el('option');o.value=c.index;o.textContent=c.label;csel.appendChild(o);});
+    if(src.col<0||src.col>=cols.length) src.col=guessCol(src);
+    csel.value=src.col;
+    csel.onchange=()=>{ src.col=+csel.value; renderAll(); };
+    fc.appendChild(csel); controls.appendChild(fc);
+
+    // count
+    const cnt=el('div','count');
+    const ids=extractIds(src);
+    cnt.innerHTML='<b>'+ids.length+'</b> tracking IDs found';
+    controls.appendChild(cnt);
+
+    card.appendChild(controls);
+  }
+  return card;
+}
+
+function autoCol(src){
+  src.col=guessCol(src);
+}
+
+async function loadFile(src,file){
+  try{
+    toast('Reading '+file.name+'…');
+    const wb=await readWorkbook(file);
+    src.file=file; src.wb=wb; src.sheet=wb.SheetNames[0];
+    autoCol(src);
+    renderAll();
+  }catch(err){
+    console.error(err);
+    alert('Could not read "'+file.name+'".\n\n'+err.message);
+  }
+}
+
+function refreshRun(){
+  const bolReady=bolList.some(b=>b.wb&&b.col>=0);
+  const scanReady=scan.wb&&scan.col>=0;
+  const ok=bolReady&&scanReady;
+  $('#runBtn').disabled=!ok;
+  $('#runHint').textContent= ok ? 'Ready.' :
+    (!scanReady? 'Load the scan report to enable.' : 'Load at least one BOL to enable.');
+}
+
+/* ---------- cross-check ---------- */
+function runCrossCheck(){
+  // scan set
+  const scanIds=extractIds(scan);
+  const scanSet=new Map();               // norm -> raw
+  scanIds.forEach(o=>{ if(!scanSet.has(o.norm)) scanSet.set(o.norm,o.raw); });
+
+  const perBol=[];
+  const bolNormSet=new Set();
+  let totalBol=0, totalMissing=0, totalMatched=0;
+
+  bolList.filter(b=>b.wb&&b.col>=0).forEach(b=>{
+    const ids=extractIds(b);
+    const seen=new Set();
+    const missing=[], matched=[];
+    let dupes=0;
+    ids.forEach(o=>{
+      bolNormSet.add(o.norm);
+      if(seen.has(o.norm)){ dupes++; return; }
+      seen.add(o.norm);
+      if(scanSet.has(o.norm)) matched.push(o.raw);
+      else missing.push(o.raw);
+    });
+    totalBol+=seen.size; totalMissing+=missing.length; totalMatched+=matched.length;
+    perBol.push({name:b.name, total:seen.size, matched, missing, dupes});
+  });
+
+  // scanned but not on any BOL
+  const extras=[];
+  scanSet.forEach((raw,norm)=>{ if(!bolNormSet.has(norm)) extras.push(raw); });
+
+  renderResults({perBol,extras,totalBol,totalMissing,totalMatched,scanCount:scanSet.size});
+}
+
+function renderResults(r){
+  const box=$('#results'); box.classList.add('show'); box.innerHTML='';
+
+  const allGood=r.totalMissing===0;
+  const banner=el('div','banner '+(allGood?'ok':'bad'));
+  banner.innerHTML=(allGood?'✓ ':'⚠ ')+
+    (allGood
+      ? 'All '+r.totalBol+' BOL tracking IDs were scanned. Nothing missing.'
+      : r.totalMissing+' of '+r.totalBol+' BOL tracking IDs were NOT found in the scan report.');
+  box.appendChild(banner);
+
+  const sum=el('div','summary');
+  sum.appendChild(stat('',r.totalBol,'BOL tracking IDs'));
+  sum.appendChild(stat('',r.scanCount,'Scanned IDs'));
+  sum.appendChild(stat('ok',r.totalMatched,'Matched'));
+  sum.appendChild(stat(r.totalMissing?'bad':'ok',r.totalMissing,'Missing (not scanned)'));
+  sum.appendChild(stat(r.extras.length?'warn':'',r.extras.length,'Scanned, not on any BOL'));
+  box.appendChild(sum);
+
+  r.perBol.forEach(b=>box.appendChild(groupBlock(b)));
+
+  if(r.extras.length){
+    box.appendChild(extrasBlock(r.extras));
+  }
+
+  // email drafter
+  box.appendChild(buildEmail(r));
+  box.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function stat(cls,n,label){
+  const s=el('div','stat '+cls);
+  s.innerHTML='<div class="n">'+n+'</div><div class="l">'+label+'</div>';
+  return s;
+}
+
+function groupBlock(b){
+  const g=el('div','grp');
+  const hd=el('div','hd');
+  const pillCls=b.missing.length?'bad':'ok';
+  hd.innerHTML='<span>'+escapeHtml(b.name)+'</span>'+
+    '<span class="pill '+pillCls+'">'+(b.missing.length?b.missing.length+' missing':'all scanned')+'</span>';
+  const body=el('div','body');
+  let html='<p class="note">'+b.total+' unique IDs · '+b.matched.length+' matched · '+b.missing.length+' missing'+
+    (b.dupes?' · '+b.dupes+' duplicate row(s) ignored':'')+'</p>';
+  if(b.missing.length){
+    html+='<div class="idlist">'+b.missing.map(id=>'<span class="id miss">'+escapeHtml(id)+'</span>').join('')+'</div>';
+  }else{
+    html+='<p class="note" style="color:var(--ok)">✓ Every ID on this BOL was scanned.</p>';
+  }
+  body.innerHTML=html;
+  hd.onclick=()=>body.classList.toggle('show');
+  if(b.missing.length) body.classList.add('show');
+  g.appendChild(hd); g.appendChild(body);
+  return g;
+}
+
+function extrasBlock(extras){
+  const g=el('div','grp');
+  const hd=el('div','hd');
+  hd.innerHTML='<span>Scanned but not on any BOL</span><span class="pill" style="background:rgba(251,191,36,.15);color:var(--warn)">'+extras.length+'</span>';
+  const body=el('div','body');
+  body.innerHTML='<p class="note">These were scanned by Ops but don&rsquo;t appear on any loaded BOL — could be a different load, a typo, or a missing BOL.</p>'+
+    '<div class="idlist">'+extras.map(id=>'<span class="id">'+escapeHtml(id)+'</span>').join('')+'</div>';
+  hd.onclick=()=>body.classList.toggle('show');
+  g.appendChild(hd); g.appendChild(body);
+  return g;
+}
+
+/* ---------- email ---------- */
+function buildEmail(r){
+  const wrap=el('div','email');
+  wrap.innerHTML='<h2 style="font-size:16px;margin:0 0 4px">Draft email</h2>'+
+    '<p class="desc" style="color:var(--muted);font-size:13px;margin:0 0 14px">Auto-filled with the missing tracking IDs. Edit anything below, then copy or open in your mail app.</p>';
+
+  const frow=el('div','frow');
+  const toF=fld('To','email','ops@yourcompany.com');
+  const subjF=fld('Subject','text','');
+  const weekF=fld('Week of','text',defaultWeek());
+  frow.appendChild(toF.wrap); frow.appendChild(weekF.wrap); frow.appendChild(subjF.wrap);
+  wrap.appendChild(frow);
+
+  const ta=el('textarea'); wrap.appendChild(ta);
+
+  const build=()=>{
+    const week=weekF.input.value.trim();
+    subjF.input.value='Missing scans — BOL cross-check'+(week?' (week of '+week+')':'');
+    ta.value=emailBody(r,week);
+  };
+
+  const actions=el('div','actions');
+  const copy=el('button','primary'); copy.textContent='Copy email';
+  copy.onclick=()=>{ navigator.clipboard.writeText(ta.value).then(()=>toast('Email copied to clipboard')); };
+  const mail=el('button','ghost'); mail.textContent='Open in mail app';
+  mail.onclick=()=>{
+    const url='mailto:'+encodeURIComponent(toF.input.value)+
+      '?subject='+encodeURIComponent(subjF.input.value)+
+      '&body='+encodeURIComponent(ta.value);
+    window.location.href=url;
+  };
+  const copyIds=el('button','ghost'); copyIds.textContent='Copy just the IDs';
+  copyIds.onclick=()=>{
+    const ids=[]; r.perBol.forEach(b=>b.missing.forEach(id=>ids.push(id)));
+    navigator.clipboard.writeText(ids.join('\n')).then(()=>toast(ids.length+' IDs copied'));
+  };
+  actions.appendChild(copy); actions.appendChild(mail); actions.appendChild(copyIds);
+  wrap.appendChild(actions);
+
+  weekF.input.oninput=build;
+  build();
+  return wrap;
+}
+
+function fld(label,type,val){
+  const wrap=el('div','fld');
+  const l=el('label'); l.textContent=label;
+  const input=el('input'); input.type=type; input.value=val||'';
+  wrap.appendChild(l); wrap.appendChild(input);
+  return {wrap,input};
+}
+
+function defaultWeek(){
+  const d=new Date();
+  return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
+}
+
+function emailBody(r,week){
+  const L=[];
+  L.push('Hi team,');
+  L.push('');
+  L.push('We cross-checked this week’s carrier BOLs'+(week?' (week of '+week+')':'')+
+    ' against Pasquale’s scan report. The following tracking IDs were on a BOL but were NOT found in the scan report:');
+  L.push('');
+  let any=false;
+  r.perBol.forEach(b=>{
+    if(!b.missing.length) return;
+    any=true;
+    L.push(b.name+' — '+b.missing.length+' missing:');
+    b.missing.forEach(id=>L.push('  • '+id));
+    L.push('');
+  });
+  if(!any){
+    L.push('  (No missing IDs — everything on the BOLs was scanned.)');
+    L.push('');
+  }
+  L.push('Summary: '+r.totalMatched+' of '+r.totalBol+' BOL IDs scanned, '+r.totalMissing+' missing.');
+  if(r.extras.length){
+    L.push(r.extras.length+' scanned ID(s) did not appear on any BOL — flagging in case a BOL is missing.');
+  }
+  L.push('');
+  L.push('Please locate/scan the missing packages or confirm they were not received.');
+  L.push('');
+  L.push('Thanks,');
+  return L.join('\n');
+}
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+/* ---------- init ---------- */
+$('#addBol').onclick=()=>{ bolList.push(newBol()); renderAll(); };
+$('#runBtn').onclick=runCrossCheck;
+bolList.push(newBol('Intelcom'));
+bolList.push(newBol('Metro'));
+renderAll();
+</script>
+</body>
+</html>
